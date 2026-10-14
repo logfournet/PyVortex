@@ -65,31 +65,52 @@ DANGER_DARK = "#c13d35"
 
 
 def make_dirt_icon():
-    """Generate a Minecraft dirt block PhotoImage (32×32) for the window icon."""
+    """Generate a Minecraft grass block PhotoImage (32×32) for the window icon.
+
+    Top ~9 rows are green grass, bottom rows are brown dirt, with a ragged
+    grass/dirt transition in between — just like the real block.
+    """
     import random
     w = h = 32
     img = tk.PhotoImage(width=w, height=h)
-    base = (139, 94, 60)
-    dark = (107, 63, 31)
-    light = (160, 107, 69)
-    spot = (74, 46, 26)
-    rng = random.Random(42)  # deterministic seed
+    # Grass palette
+    grass_base = (89, 176, 60)
+    grass_dark = (62, 140, 38)
+    grass_light = (110, 200, 78)
+    # Dirt palette
+    dirt_base = (139, 94, 60)
+    dirt_dark = (107, 63, 31)
+    dirt_light = (160, 107, 69)
+    dirt_spot = (74, 46, 26)
+    # Ragged grass/dirt boundary per column (row where dirt starts)
+    rng = random.Random(42)
+    boundary = [8 + rng.randint(-2, 3) for _ in range(w)]
     rows = []
     for y in range(h):
         row = []
         for x in range(w):
-            n = rng.random()
-            if n < 0.08:
-                c = spot
-            elif n < 0.22:
-                c = dark
-            elif n < 0.35:
-                c = light
+            is_grass = y < boundary[x]
+            if is_grass:
+                n = rng.random()
+                if n < 0.18:
+                    c = grass_dark
+                elif n < 0.35:
+                    c = grass_light
+                else:
+                    c = grass_base
             else:
-                c = base
-            r = max(0, min(255, c[0] + rng.randint(-8, 8)))
-            g = max(0, min(255, c[1] + rng.randint(-8, 8)))
-            b = max(0, min(255, c[2] + rng.randint(-8, 8)))
+                n = rng.random()
+                if n < 0.08:
+                    c = dirt_spot
+                elif n < 0.22:
+                    c = dirt_dark
+                elif n < 0.35:
+                    c = dirt_light
+                else:
+                    c = dirt_base
+            r = max(0, min(255, c[0] + rng.randint(-6, 6)))
+            g = max(0, min(255, c[1] + rng.randint(-6, 6)))
+            b = max(0, min(255, c[2] + rng.randint(-6, 6)))
             row.append(f"#{r:02x}{g:02x}{b:02x}")
         rows.append(" ".join(row))
     img.put(rows)
@@ -167,15 +188,15 @@ def setup_style(widget):
                           ("disabled", PANEL)],
               foreground=[("active", "#ffffff"), ("disabled", MUTED)])
 
-    style.configure("Accent.TButton", background=ACCENT, foreground="#0b1512",
+    style.configure("Accent.TButton", background=ACCENT, foreground="#ffffff",
                     font=(FONT, 11, "bold"), padding=(12, 12))
     style.map("Accent.TButton",
               background=[("active", "#4ce59c"), ("pressed", ACCENT_DARK),
                           ("disabled", ACCENT_DIM)],
-              foreground=[("active", "#0b1512"), ("disabled", "#6f8f80")])
+              foreground=[("active", "#ffffff"), ("disabled", "#6f8f80")])
 
-    style.configure("Danger.TButton", background="#7a2f2b", foreground=TEXT,
-                    font=(FONT, 10), padding=(14, 9))
+    style.configure("Danger.TButton", background="#7a2f2b", foreground="#ffffff",
+                    font=(FONT, 10, "bold"), padding=(14, 9))
     style.map("Danger.TButton",
               background=[("active", "#933a35"), ("pressed", DANGER_DARK),
                           ("disabled", PANEL)],
@@ -968,7 +989,7 @@ class AccountManagerWindow(tk.Toplevel):
         dlg.transient(self)
         dlg.configure(bg=BG)
         setup_style(dlg)
-        centre_win(dlg, 300, 150)
+        centre_win(dlg, 360, 190)
         f = ttk.Frame(dlg, style="BG.TFrame")
         f.pack(fill="both", expand=True, padx=12, pady=12)
         ttk.Label(f, text="Display name (3+ characters):", style="BG.TLabel"

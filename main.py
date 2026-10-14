@@ -1,4 +1,4 @@
-"""PyVortex custom minecraft launcher - entry point (GUI)."""
+"""Releases custom minecraft launcher - entry point (GUI)."""
 
 import os
 import sys
