@@ -9,8 +9,12 @@ venv/
 
 # Build outputs
 dist/
+dist_nuitka/
 build/
 *.spec
+*.build/
+*.dist/
+*.onefile-build/
 
 # Runtime
 config.json
