@@ -1,0 +1,34 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.venv/
+venv/
+*.egg-info/
+
+# Build outputs
+dist/
+build/
+*.spec
+
+# Runtime
+config.json
+launch_command.txt
+options.txt
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Minecraft game data
+versions/
+libraries/
+assets/
+logs/
+downloads/
+java_runtime/
+resourcepacks/
+saves/
