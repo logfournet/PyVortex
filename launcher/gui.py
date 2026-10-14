@@ -27,11 +27,24 @@ from . import avatar
 from .game import GameLauncher
 from .java import JavaManager, PREFERRED_DEFAULT
 
-if getattr(sys, "frozen", False):
-    # Frozen (PyInstaller exe): keep config.json next to the executable.
-    APP_DIR = Path(sys.executable).resolve().parent
-else:
-    APP_DIR = Path(__file__).resolve().parent.parent
+def _detect_app_dir():
+    """Determine the directory for config.json.
+
+    PyInstaller sets sys.frozen; Nuitka sets __nuitka_binary_dir on __main__.
+    In both cases config lives next to the executable.  When running from
+    source, it lives at the project root (one level up from launcher/).
+    """
+    # PyInstaller
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).resolve().parent
+    # Nuitka (onefile or standalone)
+    main_mod = sys.modules.get("__main__")
+    if main_mod and getattr(main_mod, "__compiled__", None):
+        return Path(sys.executable).resolve().parent
+    # Running from source
+    return Path(__file__).resolve().parent.parent
+
+APP_DIR = _detect_app_dir()
 CONFIG_FILE = APP_DIR / "config.json"
 
 # Default game data location (%APPDATA%\PyVortex), editable in Settings.
@@ -989,9 +1002,9 @@ class AccountManagerWindow(tk.Toplevel):
         dlg.transient(self)
         dlg.configure(bg=BG)
         setup_style(dlg)
-        centre_win(dlg, 360, 190)
+        centre_win(dlg, 360, 200)
         f = ttk.Frame(dlg, style="BG.TFrame")
-        f.pack(fill="both", expand=True, padx=12, pady=12)
+        f.pack(fill="both", expand=True, padx=16, pady=14)
         ttk.Label(f, text="Display name (3+ characters):", style="BG.TLabel"
                   ).pack(anchor="w")
         var = tk.StringVar(value="Player1")
@@ -999,8 +1012,8 @@ class AccountManagerWindow(tk.Toplevel):
         ent.pack(fill="x", pady=(6, 4))
         ent.focus_set()
         ttk.Label(f, text="Offline accounts play without a paid Minecraft "
-                          "profile.", style="Muted.TLabel", wraplength=270,
-                  justify="left").pack(anchor="w", pady=(0, 8))
+                          "profile.", style="Muted.TLabel", wraplength=320,
+                  justify="left").pack(anchor="w", pady=(0, 10))
         def ok():
             name = var.get().strip()
             if len(name) < 3:
@@ -1014,10 +1027,12 @@ class AccountManagerWindow(tk.Toplevel):
             dlg.destroy()
         row = ttk.Frame(f, style="BG.TFrame")
         row.pack(fill="x", pady=(6, 0))
+        row.columnconfigure(0, weight=1)
+        row.columnconfigure(1, weight=1)
         ttk.Button(row, text="Add", style="Accent.TButton",
-                   command=ok).pack(side="left", expand=True, fill="x", padx=(0, 3))
-        ttk.Button(row, text="Cancel", command=dlg.destroy).pack(
-            side="left", expand=True, fill="x", padx=(3, 0))
+                   command=ok).grid(row=0, column=0, sticky="we", padx=(0, 4))
+        ttk.Button(row, text="Cancel", style="Big.TButton",
+                   command=dlg.destroy).grid(row=0, column=1, sticky="we", padx=(4, 0))
 
     def _add_microsoft(self):
         self.status.config(text="")

@@ -293,7 +293,7 @@ def library_path(lib_coords: str, natives=False) -> list:
         base += "-natives-windows"
     elif classifier:
         base += f"-{classifier}"
-    return [group, artifact, f"{base}.jar"]
+    return [group, artifact, version, f"{base}.jar"]
 
 
 # --------------------------------------------------------------------------- #
@@ -311,8 +311,13 @@ def download_missing_libraries(root: Path, version_meta: dict, progress=None):
         # Artifact jar
         artifact = downloads.get("artifact")
         if artifact:
-            rel = library_path(coords)
-            local = root / "libraries" / Path(*rel)
+            # Prefer the official path from the manifest when available.
+            apath = artifact.get("path")
+            if apath:
+                local = root / "libraries" / Path(*apath.split("/"))
+            else:
+                rel = library_path(coords)
+                local = root / "libraries" / Path(*rel)
             tasks.append((artifact.get("url"), local, artifact.get("sha1")))
         else:
             # Legacy library with only a `url` (no downloads block)
@@ -327,8 +332,12 @@ def download_missing_libraries(root: Path, version_meta: dict, progress=None):
         classifiers = downloads.get("classifiers", {})
         natives = classifiers.get("natives-windows") or classifiers.get("natives-windows-64")
         if natives:
-            rel = library_path(coords, natives=True)
-            local = root / "libraries" / Path(*rel)
+            npath = natives.get("path")
+            if npath:
+                local = root / "libraries" / Path(*npath.split("/"))
+            else:
+                rel = library_path(coords, natives=True)
+                local = root / "libraries" / Path(*rel)
             tasks.append((natives.get("url"), local, natives.get("sha1")))
 
     total = len(tasks)
@@ -368,8 +377,12 @@ def extract_natives(root: Path, version_meta: dict, version_id: str):
         if not natives:
             continue
         coords = lib.get("name", "")
-        rel = library_path(coords, natives=True)
-        jar = root / "libraries" / Path(*rel)
+        npath = natives.get("path")
+        if npath:
+            jar = root / "libraries" / Path(*npath.split("/"))
+        else:
+            rel = library_path(coords, natives=True)
+            jar = root / "libraries" / Path(*rel)
         if not jar.exists():
             continue
         try:
@@ -397,8 +410,12 @@ def build_classpath(root: Path, version_meta: dict, version_id: str) -> list:
         if lib.get("natives") or classifiers.get("natives-windows"):
             continue
         coords = lib.get("name", "")
-        rel = library_path(coords)
-        local = root / "libraries" / Path(*rel)
+        apath = (lib.get("downloads") or {}).get("artifact", {}).get("path")
+        if apath:
+            local = root / "libraries" / Path(*apath.split("/"))
+        else:
+            rel = library_path(coords)
+            local = root / "libraries" / Path(*rel)
         if local.exists():
             cp.append(str(local))
     client_jar = root / "versions" / version_id / f"{version_id}.jar"
@@ -441,8 +458,12 @@ def build_arguments(root: Path, version_meta: dict, version_id: str,
         if lib.get("natives") or classifiers.get("natives-windows"):
             continue
         coords = lib.get("name", "")
-        rel = library_path(coords)
-        local = libs_root / Path(*rel)
+        apath = (lib.get("downloads") or {}).get("artifact", {}).get("path")
+        if apath:
+            local = libs_root / Path(*apath.split("/"))
+        else:
+            rel = library_path(coords)
+            local = libs_root / Path(*rel)
         if local.exists():
             cp.append(str(local))
     client_dir = root / "versions" / version_id
