@@ -1836,7 +1836,7 @@ class SettingsWindow(tk.Toplevel):
         setup_style(self)
         self.title("Settings")
         self.transient(master)
-        centre_win(self, 420, 420)
+        centre_win(self, 420, 520)
         self.resizable(False, False)
         self.configure(bg=BG)
 
@@ -1888,6 +1888,18 @@ class SettingsWindow(tk.Toplevel):
                   text="Bundled Java is auto-downloaded; no system Java required.",
                   style="Muted.TLabel").pack(anchor="w", pady=(2, 2))
 
+        tk.Frame(outer, bg=OUTLINE, height=1).pack(fill="x", pady=6)
+
+        # Diagnostics
+        ttk.Label(outer, text="Diagnostics", style="BG.TLabel").pack(anchor="w")
+        ttk.Label(outer,
+                  text="The last launch command is saved to launch_command.txt\n"
+                       "in the game directory. Copy it to share a bug report.",
+                  style="Muted.TLabel", justify="left").pack(anchor="w", pady=(2, 4))
+        ttk.Button(outer, text="Copy last launch command",
+                   style="Secondary.TButton",
+                   command=self._copy_last_command).pack(fill="x")
+
         row = ttk.Frame(outer, style="BG.TFrame")
         row.pack(fill="x", pady=(16, 0))
         ttk.Button(row, text="Save", style="Accent.TButton",
@@ -1896,6 +1908,18 @@ class SettingsWindow(tk.Toplevel):
         ttk.Button(row, text="Close", style="Secondary.TButton",
                    command=self.destroy).pack(side="left", fill="x",
                                               expand=True, padx=(3, 0))
+
+    def _copy_last_command(self):
+        text = core.read_last_launch_command(self.app.game_dir)
+        if not text:
+            messagebox.showwarning(
+                "Diagnostics",
+                "No launch command yet.\n\nStart the game once, then try again.")
+            return
+        self.clipboard_clear()
+        self.clipboard_append(text)
+        messagebox.showinfo("Diagnostics",
+                            "Last launch command copied to the clipboard.")
 
     def _java_descr(self):
         b = self.app.launcher.java.bundled_javaw()

@@ -222,5 +222,28 @@ class BuildArgumentsTests(unittest.TestCase):
             self.assertNotIn("blocked", classpath)
 
 
+class LastLaunchCommandTests(unittest.TestCase):
+    def test_missing_file_is_empty(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            self.assertEqual(core.read_last_launch_command(Path(tmp)), "")
+
+    def test_reads_and_strips(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "launch_command.txt").write_text(
+                "  javaw.exe -Xmx2048M net.minecraft.client.main.Main  \n",
+                encoding="utf-8")
+            self.assertEqual(
+                core.read_last_launch_command(root),
+                "javaw.exe -Xmx2048M net.minecraft.client.main.Main")
+
+    def test_unreadable_file_is_empty(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            # A directory in place of the file must not raise.
+            (root / "launch_command.txt").mkdir()
+            self.assertEqual(core.read_last_launch_command(root), "")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
