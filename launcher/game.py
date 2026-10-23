@@ -119,7 +119,7 @@ class GameLauncher:
         natives_dir = (self.root / "versions" / version_id / "natives").as_posix()
         game_dir = str(self.root).replace("\\", "/")
 
-        # Resolve authentication: premium (Microsoft) vs offline (cracked).
+        # Resolve authentication: Microsoft account vs local offline profile.
         is_premium = bool(account) and account.get("type") == "microsoft"
         if is_premium:
             uuid = account.get("uuid") or core.offline_uuid(player_name)

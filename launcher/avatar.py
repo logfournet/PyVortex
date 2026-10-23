@@ -20,7 +20,7 @@ Two public avatar providers are tried, in order:
 
      Works for ANY username: a real Mojang username returns that player's skin
      face, and an unknown/offline username (e.g. "SFC") returns the default
-     Steve face.  Used for offline/cracked accounts (which have no UUID).
+     Steve face.  Used for local offline profiles (which have no UUID).
 
 The returned PNG is decoded with a pure-stdlib decoder (struct + zlib, undoing
 the row filters) supporting the common 8-bit colour types (grayscale, RGB,

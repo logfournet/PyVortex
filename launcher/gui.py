@@ -1,7 +1,7 @@
 """Tkinter GUI for PyVortex — a modern, professional launcher interface.
 
 Dark, polished theme with a Minecraft-launcher feel.  Features:
-  * Multi-account support (Microsoft premium + offline/cracked)
+  * Multi-account support (Microsoft accounts + local offline profiles)
   * In-game avatar previews (player face) with async loading + cache
   * Configurable game directory, version downloader, settings,
     Java install flow and GameLauncher wiring.
@@ -982,8 +982,8 @@ class AccountManagerWindow(tk.Toplevel):
         btns.pack(fill="x", pady=(14, 0))
         ttk.Button(btns, text="Add Microsoft", style="Big.TButton",
                    command=self._add_microsoft).pack(side="left", padx=(0, 4))
-        ttk.Button(btns, text="Add Crack", style="Big.TButton",
-                   command=self._add_crack).pack(side="left", padx=(0, 4))
+        ttk.Button(btns, text="Add Offline", style="Big.TButton",
+                   command=self._add_offline).pack(side="left", padx=(0, 4))
         ttk.Button(btns, text="Delete", style="Danger.TButton",
                    command=self._delete).pack(side="left")
 
@@ -1039,7 +1039,7 @@ class AccountManagerWindow(tk.Toplevel):
             if self.app._selected_account else None)
         save_config(self.app.cfg)
 
-    def _add_crack(self):
+    def _add_offline(self):
         dlg = tk.Toplevel(self)
         dlg.title("Add Offline Account")
         dlg.transient(self)
@@ -1054,8 +1054,9 @@ class AccountManagerWindow(tk.Toplevel):
         ent = ttk.Entry(f, textvariable=var)
         ent.pack(fill="x", pady=(6, 4))
         ent.focus_set()
-        ttk.Label(f, text="Offline accounts play without a paid Minecraft "
-                          "profile.", style="Muted.TLabel", wraplength=320,
+        ttk.Label(f, text="Local profiles run single-player without signing "
+                          "in to any account.", style="Muted.TLabel",
+                  wraplength=320,
                   justify="left").pack(anchor="w", pady=(0, 10))
         def ok():
             name = var.get().strip()

@@ -1,6 +1,6 @@
 """
 Core logic for PyVortex: Mojang version manifest parsing, asset/library
-downloading, native extraction and offline (cracked) game launching.
+downloading, native extraction and offline game launching.
 Uses only the Python standard library.
 """
 
@@ -456,7 +456,7 @@ def build_arguments(root: Path, version_meta: dict, version_id: str,
     `account` (optional) may carry premium auth values:
       {"access_token", "uuid", "name"} etc.
     `access_token`/`user_type` override the legacy placeholders used for
-    offline (cracked) play.
+    offline play.
     """
     game_args = []
     jvm_args = []
