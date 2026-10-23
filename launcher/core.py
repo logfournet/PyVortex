@@ -565,3 +565,17 @@ def build_arguments(root: Path, version_meta: dict, version_id: str,
 
 def log(msg):
     print(f"[PyVortex] {msg}")
+
+
+def read_last_launch_command(root: Path) -> str:
+    """Return the JVM command line written by the last launch, or "".
+
+    `launcher/game.py` dumps the exact command to `launch_command.txt` right
+    before spawning Java, which makes it the most useful thing to attach to a
+    bug report.  Missing/old files simply yield an empty string.
+    """
+    try:
+        return (Path(root) / "launch_command.txt").read_text(
+            "utf-8", errors="replace").strip()
+    except OSError:
+        return ""
