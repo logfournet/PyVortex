@@ -33,12 +33,13 @@ build/
 *.swp
 *.swo
 
-# Minecraft game data
-versions/
-libraries/
-assets/
-logs/
-downloads/
-java_runtime/
-resourcepacks/
-saves/
+# Minecraft game data (anchored to the repo root so `launcher/assets/` is
+# still tracked — the EXE icon lives there)
+/versions/
+/libraries/
+/assets/
+/logs/
+/downloads/
+/java_runtime/
+/resourcepacks/
+/saves/
