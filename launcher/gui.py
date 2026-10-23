@@ -28,28 +28,36 @@ from .game import GameLauncher
 from .java import JavaManager, PREFERRED_DEFAULT
 
 def _detect_app_dir():
-    """Determine the directory for config.json.
+    """Config lives in the vanilla game data directory (%APPDATA%/.minecraft).
 
-    PyInstaller sets sys.frozen; Nuitka sets __nuitka_binary_dir on __main__.
-    In both cases config lives next to the executable.  When running from
-    source, it lives at the project root (one level up from launcher/).
+    Sharing the standard .minecraft folder means the launcher reuses the
+    same versions/mods/saves as the official Minecraft launcher, and avoids
+    all detection issues with PyInstaller/Nuitka temp dirs.
     """
-    # PyInstaller
-    if getattr(sys, "frozen", False):
-        return Path(sys.executable).resolve().parent
-    # Nuitka (onefile or standalone)
-    main_mod = sys.modules.get("__main__")
-    if main_mod and getattr(main_mod, "__compiled__", None):
-        return Path(sys.executable).resolve().parent
-    # Running from source
-    return Path(__file__).resolve().parent.parent
+    return Path(os.environ.get("APPDATA", str(Path.home()))) / ".minecraft"
 
 APP_DIR = _detect_app_dir()
+APP_DIR.mkdir(parents=True, exist_ok=True)
 CONFIG_FILE = APP_DIR / "config.json"
 
-# Default game data location (%APPDATA%\PyVortex), editable in Settings.
+# Default game data location (%APPDATA%\.minecraft), editable in Settings.
 DEFAULT_GAME_DIR = Path(
-    os.environ.get("APPDATA", str(Path.home()))) / "PyVortex"
+    os.environ.get("APPDATA", str(Path.home()))) / ".minecraft"
+
+# Migrate config/accounts from older builds that used %APPDATA%/PyVortex.
+_OLD_APP_DIR = Path(os.environ.get("APPDATA", str(Path.home()))) / "PyVortex"
+if not CONFIG_FILE.exists() and (_OLD_APP_DIR / "config.json").exists():
+    try:
+        import shutil
+        shutil.copyfile(_OLD_APP_DIR / "config.json", CONFIG_FILE)
+        # Point a stale game_dir back at the standard .minecraft folder.
+        _migrated = json.loads(CONFIG_FILE.read_text("utf-8-sig"))
+        if Path(_migrated.get("game_dir", "")).name == "PyVortex":
+            _migrated["game_dir"] = str(DEFAULT_GAME_DIR)
+            CONFIG_FILE.write_text(
+                json.dumps(_migrated, indent=2, ensure_ascii=False), "utf-8")
+    except Exception:
+        pass
 
 DEFAULTS = {
     "name": "Player1",
@@ -463,6 +471,19 @@ def account_label(acc):
     return acc.get("name", "?")
 
 
+def _ensure_launcher_profiles(game_dir: Path):
+    """Create a minimal launcher_profiles.json if absent.
+
+    Fabric Installer and some other mod installers require this file to exist
+    in the game directory.  Without it Fabric throws:
+      java.lang.RuntimeException: No launcher profile.json found!
+    """
+    lp = game_dir / "launcher_profiles.json"
+    if not lp.exists():
+        data = {"profiles": {}, "selectedProfile": "", "clientToken": ""}
+        lp.write_text(json.dumps(data, indent=2), "utf-8")
+
+
 # --- main window ----------------------------------------------------------- #
 class LauncherApp:
     def __init__(self, root: tk.Tk):
@@ -471,6 +492,7 @@ class LauncherApp:
         core.set_download_workers(self.cfg.get("download_threads", core.DOWNLOAD_WORKERS))
         self.game_dir = Path(self.cfg.get("game_dir") or DEFAULT_GAME_DIR)
         self.game_dir.mkdir(parents=True, exist_ok=True)
+        _ensure_launcher_profiles(self.game_dir)
         self.launcher = GameLauncher(self.game_dir)
         self.versions = []
         self._installing = False
@@ -494,7 +516,7 @@ class LauncherApp:
         except Exception:
             pass
 
-        W, H = 470, 620
+        W, H = 470, 660
         centre_win(root, W, H)
 
         outer = ttk.Frame(root, style="BG.TFrame", padding=(20, 18))
@@ -524,8 +546,7 @@ class LauncherApp:
         acc_top.pack(fill="x")
         ttk.Label(acc_top, text="ACCOUNT", style="CardMuted.TLabel"
                   ).pack(side="left")
-        ttk.Label(acc_top, text="player profile", style="CardMuted.TLabel"
-                  ).pack(side="right")
+
 
         acc_row = ttk.Frame(acc_card, style="Card.TFrame")
         acc_row.pack(fill="x", pady=(10, 0))
@@ -621,9 +642,21 @@ class LauncherApp:
                                        command=self._open_settings)
         self.btn_settings.pack(side="left", fill="x", expand=True, padx=(4, 0))
 
+        # ---- Folder buttons ------------------------------------------- #
+        row2 = ttk.Frame(outer, style="BG.TFrame")
+        row2.pack(fill="x", pady=(6, 0))
+        ttk.Button(row2, text="\U0001F4C2 Game Folder",
+                   style="Secondary.TButton",
+                   command=self._open_game_folder
+                   ).pack(side="left", fill="x", expand=True, padx=(0, 4))
+        self.btn_mods = ttk.Button(row2, text="\U0001F4C2 Mods Folder",
+                                   style="Secondary.TButton",
+                                   command=self._open_mods_folder)
+        self.btn_mods.pack(side="left", fill="x", expand=True, padx=(4, 0))
+
         # ---- Footer ---------------------------------------------------- #
         foot = ttk.Frame(outer, style="BG.TFrame")
-        foot.pack(fill="x", pady=(18, 0))
+        foot.pack(fill="x", pady=(12, 0))
         ttk.Label(foot, text="PyVortex", style="Muted.TLabel").pack(side="left")
         ttk.Label(foot, text=str(self.game_dir), style="Muted.TLabel"
                   ).pack(side="right")
@@ -877,6 +910,16 @@ class LauncherApp:
 
     def _open_settings(self):
         SettingsWindow(self.root, self)
+
+    def _open_game_folder(self):
+        path = self.game_dir
+        path.mkdir(parents=True, exist_ok=True)
+        os.startfile(str(path))
+
+    def _open_mods_folder(self):
+        mods = self.game_dir / "mods"
+        mods.mkdir(parents=True, exist_ok=True)
+        os.startfile(str(mods))
 
 
 # --- account manager window ------------------------------------------------ #
@@ -1215,6 +1258,169 @@ class MicrosoftLoginDialog(tk.Toplevel):
             callback(result)
 
 
+# --- Fabric / Forge meta helpers ------------------------------------------- #
+FABRIC_META_URL = "https://meta.fabricmc.net/v2"
+FORGE_MAVEN_META = "https://maven.minecraftforge.net/net/minecraftforge/forge/maven-metadata.xml"
+FORGE_INSTALLER_URL = "https://maven.minecraftforge.net/net/minecraftforge/forge/{ver}/forge-{ver}-installer.jar"
+
+
+def _fetch_fabric_game_versions():
+    """Return list of MC version IDs that Fabric supports (newest first)."""
+    url = FABRIC_META_URL + "/versions/game"
+    data = core.http_get_json(url)
+    return [v["version"] for v in data if v.get("stable")]
+
+
+def _fetch_fabric_loader_versions():
+    """Return list of Fabric loader version strings (newest first)."""
+    url = FABRIC_META_URL + "/versions/loader"
+    data = core.http_get_json(url)
+    return [v["version"] for v in data]
+
+
+def _install_fabric(root: Path, mc_version: str, loader_version: str,
+                    progress=None, cancel_event=None):
+    """Download the Fabric profile JSON and its libraries."""
+    profile_url = (FABRIC_META_URL +
+                   f"/versions/loader/{mc_version}/{loader_version}/profile/json")
+    if progress:
+        progress("Fetching Fabric profile...", 0.05)
+    profile = core.http_get_json(profile_url)
+    version_id = profile.get("id", f"fabric-loader-{loader_version}-{mc_version}")
+    ver_dir = root / "versions" / version_id
+    ver_dir.mkdir(parents=True, exist_ok=True)
+    json_path = ver_dir / f"{version_id}.json"
+    json_path.write_text(json.dumps(profile, indent=2, ensure_ascii=False), "utf-8")
+
+    if cancel_event and cancel_event.is_set():
+        raise core.DownloadCancelled("Download cancelled")
+
+    # Make sure the parent vanilla version is present
+    inherits = profile.get("inheritsFrom", mc_version)
+    parent_json = root / "versions" / inherits / f"{inherits}.json"
+    if not parent_json.exists():
+        if progress:
+            progress(f"Downloading vanilla {inherits}...", 0.1)
+        manifest = core.VersionManifest.fetch()
+        meta_url = manifest.get_version_meta_url(inherits)
+        if meta_url:
+            ver_obj = core.MinecraftVersion.load(root, inherits, meta_url)
+            eff = ver_obj.effective()
+            dl = eff.get("downloads", {}).get("client")
+            vanilla_jar = root / "versions" / inherits / f"{inherits}.jar"
+            if dl and not vanilla_jar.exists():
+                if progress:
+                    progress(f"Downloading {inherits} client jar...", 0.15)
+                core.http_download(dl["url"], vanilla_jar)
+
+    if cancel_event and cancel_event.is_set():
+        raise core.DownloadCancelled("Download cancelled")
+
+    # Download Fabric's libraries
+    ver = core.MinecraftVersion.load(root, version_id)
+    effective = ver.effective()
+    if progress:
+        progress("Downloading Fabric libraries...", 0.3)
+    core.download_missing_libraries(root, effective, progress,
+                                    cancel_event=cancel_event)
+
+    # Create mods folder
+    (root / "mods").mkdir(exist_ok=True)
+
+    if progress:
+        progress(f"Fabric {loader_version} for {mc_version} installed!", 1.0)
+    return version_id
+
+
+def _fetch_forge_versions_for(mc_version: str):
+    """Return list of Forge version strings for a given MC version."""
+    import xml.etree.ElementTree as ET
+    xml_text = core.http_get(FORGE_MAVEN_META)
+    tree_root = ET.fromstring(xml_text)
+    versions = []
+    for v in tree_root.iter("version"):
+        text = v.text or ""
+        if text.startswith(mc_version + "-"):
+            versions.append(text)
+    return list(reversed(versions))
+
+
+def _fetch_forge_mc_versions():
+    """Return list of MC versions that have at least one Forge build."""
+    import xml.etree.ElementTree as ET
+    xml_text = core.http_get(FORGE_MAVEN_META)
+    tree_root = ET.fromstring(xml_text)
+    seen = []
+    seen_set = set()
+    for v in tree_root.iter("version"):
+        text = v.text or ""
+        mc = text.split("-")[0]
+        if mc and mc not in seen_set:
+            seen_set.add(mc)
+            seen.append(mc)
+    return list(reversed(seen))
+
+
+def _install_forge(root: Path, forge_version: str, progress=None,
+                   cancel_event=None):
+    """Download and run the Forge installer jar."""
+    import subprocess as sp
+    mc_version = forge_version.split("-")[0]
+
+    parent_json = root / "versions" / mc_version / f"{mc_version}.json"
+    if not parent_json.exists():
+        if progress:
+            progress(f"Downloading vanilla {mc_version}...", 0.05)
+        manifest = core.VersionManifest.fetch()
+        meta_url = manifest.get_version_meta_url(mc_version)
+        if meta_url:
+            ver_obj = core.MinecraftVersion.load(root, mc_version, meta_url)
+            eff = ver_obj.effective()
+            dl = eff.get("downloads", {}).get("client")
+            vanilla_jar = root / "versions" / mc_version / f"{mc_version}.jar"
+            if dl and not vanilla_jar.exists():
+                core.http_download(dl["url"], vanilla_jar)
+
+    if cancel_event and cancel_event.is_set():
+        raise core.DownloadCancelled("Download cancelled")
+
+    _ensure_launcher_profiles(root)
+
+    installer_url = FORGE_INSTALLER_URL.format(ver=forge_version)
+    installer_jar = root / "forge-installer.jar"
+    if progress:
+        progress("Downloading Forge installer...", 0.15)
+    core.http_download(installer_url, installer_jar)
+
+    if cancel_event and cancel_event.is_set():
+        installer_jar.unlink(missing_ok=True)
+        raise core.DownloadCancelled("Download cancelled")
+
+    from .java import JavaManager as _JM
+    jm = _JM(root)
+    java = jm.bundled_javaw()
+    if java:
+        java_exe = str(java).replace("javaw.exe", "java.exe")
+    else:
+        java_exe = "java"
+
+    if progress:
+        progress("Running Forge installer (may take a minute)...", 0.4)
+    cmd = [java_exe, "-jar", str(installer_jar), "--installClient", str(root)]
+    try:
+        result = sp.run(cmd, cwd=str(root), capture_output=True, text=True, timeout=300)
+        if result.returncode != 0:
+            err = (result.stderr or result.stdout or "")[-500:]
+            raise RuntimeError(f"Forge installer failed (exit {result.returncode}):\n{err}")
+    finally:
+        installer_jar.unlink(missing_ok=True)
+
+    (root / "mods").mkdir(exist_ok=True)
+    if progress:
+        progress(f"Forge {forge_version} installed!", 1.0)
+    return forge_version
+
+
 # --- downloader window ----------------------------------------------------- #
 class DownloaderWindow(tk.Toplevel):
     def __init__(self, master, launcher, on_done=None):
@@ -1222,121 +1428,402 @@ class DownloaderWindow(tk.Toplevel):
         self.launcher = launcher
         self.on_done = on_done
         self.downloading = False
+        self._cancelled = None  # threading.Event, created per download
 
         setup_style(self)
-        self.title("Client Downloader")
+        self.title("Downloader")
         self.transient(master)
-        centre_win(self, 360, 280)
+        centre_win(self, 440, 400)
         self.resizable(False, False)
         self.configure(bg=BG)
         self.protocol("WM_DELETE_WINDOW", self._close)
 
+        style = ttk.Style(self)
+        style.configure("Tab.TButton", background=PANEL, foreground=MUTED,
+                         padding=(16, 8), font=(FONT, 10))
+        style.map("Tab.TButton",
+                   background=[("active", CARD_HOVER)],
+                   foreground=[("active", TEXT)])
+        style.configure("TabActive.TButton", background=ACCENT_DIM,
+                         foreground="#ffffff", padding=(16, 8),
+                         font=(FONT, 10, "bold"))
+        style.map("TabActive.TButton",
+                   background=[("active", ACCENT_DARK)],
+                   foreground=[("active", "#ffffff")])
+
         outer = ttk.Frame(self, style="BG.TFrame", padding=(14, 12))
         outer.pack(fill="both", expand=True)
 
-        ttk.Label(outer, text="CLIENT DOWNLOADER", style="Subhead.TLabel"
+        ttk.Label(outer, text="DOWNLOADER", style="Subhead.TLabel"
                   ).pack(anchor="w")
         bar = tk.Frame(outer, bg=ACCENT, height=2)
-        bar.pack(fill="x", pady=(6, 12))
+        bar.pack(fill="x", pady=(6, 10))
 
-        self.version_cb = ttk.Combobox(outer, state="readonly")
-        self.version_cb.pack(fill="x", pady=2)
-        self.version_cb.set("Loading versions...")
+        # --- Tab bar ---
+        tab_row = ttk.Frame(outer, style="BG.TFrame")
+        tab_row.pack(fill="x", pady=(0, 10))
+        self._tab_btns = []
+        for i, label in enumerate(("Vanilla", "Fabric", "Forge")):
+            b = ttk.Button(tab_row, text=label,
+                           command=lambda idx=i: self._switch_tab(idx))
+            b.pack(side="left", padx=(0, 4))
+            self._tab_btns.append(b)
 
-        self.show_all = tk.BooleanVar(value=False)
-        cb = ttk.Checkbutton(outer, text="Show all versions (snapshots)",
-                             variable=self.show_all, command=self._reload)
-        cb.pack(anchor="w", pady=(8, 2))
+        # --- Content area (stacked frames) ---
+        self._content = ttk.Frame(outer, style="BG.TFrame")
+        self._content.pack(fill="both", expand=True)
 
+        self._pages = []
+        self._build_vanilla_page()
+        self._build_fabric_page()
+        self._build_forge_page()
+
+        # --- Shared status / progress ---
         self.status = ttk.Label(outer, text="", style="BG.TLabel", anchor="w")
-        self.status.pack(fill="x", pady=6)
-
+        self.status.pack(fill="x", pady=(8, 2))
         self.progress = ttk.Progressbar(outer, mode="determinate")
-        self.progress.pack(fill="x", pady=4)
+        self.progress.pack(fill="x", pady=(0, 4))
 
+        # --- Bottom buttons ---
         row = ttk.Frame(outer, style="BG.TFrame")
-        row.pack(fill="x", pady=(14, 0))
+        row.pack(fill="x", pady=(8, 0))
         self.btn_download = ttk.Button(row, text="Download",
                                        style="Accent.TButton",
                                        command=self._download)
         self.btn_download.pack(side="left", fill="x", expand=True, padx=(0, 3))
         ttk.Button(row, text="Cancel", style="Secondary.TButton",
                    command=self._close).pack(side="left", fill="x",
-                                             expand=True, padx=(3, 0))
+                                              expand=True, padx=(3, 0))
 
-        self._reload()
+        self._current_tab = -1
+        self._switch_tab(0)
 
-    def _reload(self):
-        self.version_cb.set("Loading versions...")
+    # --- page builders ----------------------------------------
+
+    def _build_vanilla_page(self):
+        page = ttk.Frame(self._content, style="BG.TFrame")
+        self._pages.append(page)
+
+        self.van_version_cb = ttk.Combobox(page, state="readonly")
+        self.van_version_cb.pack(fill="x", pady=2)
+        self.van_version_cb.set("Loading versions...")
+
+        self.van_show_all = tk.BooleanVar(value=False)
+        ttk.Checkbutton(page, text="Show all versions (snapshots)",
+                        variable=self.van_show_all,
+                        command=self._reload_vanilla).pack(anchor="w", pady=(8, 0))
+
+    def _build_fabric_page(self):
+        page = ttk.Frame(self._content, style="BG.TFrame")
+        self._pages.append(page)
+
+        ttk.Label(page, text="Minecraft version", style="BG.TLabel"
+                  ).pack(anchor="w", pady=(0, 2))
+        self.fab_mc_cb = ttk.Combobox(page, state="readonly")
+        self.fab_mc_cb.pack(fill="x", pady=2)
+        self.fab_mc_cb.set("Loading...")
+
+        ttk.Label(page, text="Fabric Loader version", style="BG.TLabel"
+                  ).pack(anchor="w", pady=(8, 2))
+        self.fab_loader_cb = ttk.Combobox(page, state="readonly")
+        self.fab_loader_cb.pack(fill="x", pady=2)
+        self.fab_loader_cb.set("Loading...")
+
+    def _build_forge_page(self):
+        page = ttk.Frame(self._content, style="BG.TFrame")
+        self._pages.append(page)
+
+        ttk.Label(page, text="Minecraft version", style="BG.TLabel"
+                  ).pack(anchor="w", pady=(0, 2))
+        self.forge_mc_cb = ttk.Combobox(page, state="readonly")
+        self.forge_mc_cb.pack(fill="x", pady=2)
+        self.forge_mc_cb.set("Loading...")
+        self.forge_mc_cb.bind("<<ComboboxSelected>>", self._on_forge_mc_selected)
+
+        ttk.Label(page, text="Forge version", style="BG.TLabel"
+                  ).pack(anchor="w", pady=(8, 2))
+        self.forge_ver_cb = ttk.Combobox(page, state="readonly")
+        self.forge_ver_cb.pack(fill="x", pady=2)
+        self.forge_ver_cb.set("Select MC version first")
+
+    # --- tab switching ----------------------------------------
+
+    def _switch_tab(self, idx):
+        if idx == self._current_tab:
+            return
+        self._current_tab = idx
+        for i, b in enumerate(self._tab_btns):
+            b.configure(style="TabActive.TButton" if i == idx else "Tab.TButton")
+        for p in self._pages:
+            p.pack_forget()
+        self._pages[idx].pack(in_=self._content, fill="both", expand=True)
+        self.status.config(text="")
+        self.progress["value"] = 0
+        if idx == 0:
+            self._reload_vanilla()
+        elif idx == 1:
+            self._reload_fabric()
+        elif idx == 2:
+            self._reload_forge()
+
+    # --- Vanilla ----------------------------------------
+
+    def _reload_vanilla(self):
+        self.van_version_cb.set("Loading versions...")
         self.btn_download.config(state="disabled")
         def work():
             try:
                 manifest = core.VersionManifest.fetch()
-                vers = manifest.list_versions(all_versions=self.show_all.get())
+                vers = manifest.list_versions(all_versions=self.van_show_all.get())
             except Exception as e:
                 vers = []
                 err = str(e)
             else:
                 err = None
-            self.after(0, lambda: self._fill(vers, err))
+            self.after(0, lambda: self._fill_vanilla(vers, err))
         threading_work(work)
 
-    def _fill(self, vers, err):
+    def _fill_vanilla(self, vers, err):
         if err:
-            self.version_cb["values"] = []
-            self.version_cb.set(f"Error: {err}")
+            self.van_version_cb["values"] = []
+            self.van_version_cb.set(f"Error: {err}")
             return
         if not vers:
-            self.version_cb.set("No versions found")
+            self.van_version_cb.set("No versions found")
             return
-        self.version_cb["values"] = vers
-        self.version_cb.current(0)
+        self.van_version_cb["values"] = vers
+        self.van_version_cb.current(0)
         self.btn_download.config(state="normal")
 
-    def _download(self):
-        version_id = self.version_cb.get()
-        if self.downloading or not version_id:
-            return
+    # --- Fabric ----------------------------------------
 
+    def _reload_fabric(self):
+        self.fab_mc_cb.set("Loading...")
+        self.fab_loader_cb.set("Loading...")
+        self.btn_download.config(state="disabled")
+        def work():
+            try:
+                mc_vers = _fetch_fabric_game_versions()
+                loader_vers = _fetch_fabric_loader_versions()
+                err = None
+            except Exception as e:
+                mc_vers, loader_vers = [], []
+                err = str(e)
+            self.after(0, lambda: self._fill_fabric(mc_vers, loader_vers, err))
+        threading_work(work)
+
+    def _fill_fabric(self, mc_vers, loader_vers, err):
+        if err:
+            self.fab_mc_cb.set(f"Error: {err}")
+            return
+        self.fab_mc_cb["values"] = mc_vers
+        if mc_vers:
+            self.fab_mc_cb.current(0)
+        self.fab_loader_cb["values"] = loader_vers
+        if loader_vers:
+            self.fab_loader_cb.current(0)
+        self.btn_download.config(state="normal")
+
+    # --- Forge ----------------------------------------
+
+    def _reload_forge(self):
+        self.forge_mc_cb.set("Loading...")
+        self.forge_ver_cb.set("Select MC version first")
+        self.btn_download.config(state="disabled")
+        def work():
+            try:
+                mc_vers = _fetch_forge_mc_versions()
+                err = None
+            except Exception as e:
+                mc_vers = []
+                err = str(e)
+            self.after(0, lambda: self._fill_forge_mc(mc_vers, err))
+        threading_work(work)
+
+    def _fill_forge_mc(self, mc_vers, err):
+        if err:
+            self.forge_mc_cb.set(f"Error: {err}")
+            return
+        self.forge_mc_cb["values"] = mc_vers
+        if mc_vers:
+            self.forge_mc_cb.current(0)
+            self._load_forge_versions(mc_vers[0])
+
+    def _on_forge_mc_selected(self, _e=None):
+        mc = self.forge_mc_cb.get()
+        if mc:
+            self._load_forge_versions(mc)
+
+    def _load_forge_versions(self, mc_version):
+        self.forge_ver_cb.set("Loading...")
+        self.btn_download.config(state="disabled")
+        def work():
+            try:
+                vers = _fetch_forge_versions_for(mc_version)
+                err = None
+            except Exception as e:
+                vers = []
+                err = str(e)
+            self.after(0, lambda: self._fill_forge_ver(vers, err))
+        threading_work(work)
+
+    def _fill_forge_ver(self, vers, err):
+        if err:
+            self.forge_ver_cb.set(f"Error: {err}")
+            return
+        if not vers:
+            self.forge_ver_cb.set("No Forge versions found")
+            return
+        self.forge_ver_cb["values"] = vers
+        self.forge_ver_cb.current(0)
+        self.btn_download.config(state="normal")
+
+    # --- download (dispatches by tab) ----------------------------------------
+
+    def _download(self):
+        if self.downloading:
+            return
+        tab = self._current_tab
+        if tab == 0:
+            self._download_vanilla()
+        elif tab == 1:
+            self._download_fabric()
+        elif tab == 2:
+            self._download_forge()
+
+    def _download_vanilla(self):
+        version_id = self.van_version_cb.get()
+        if not version_id or version_id.startswith(("Loading", "Error", "No ")):
+            return
         if version_id in self.launcher.downloaded_versions():
             if not messagebox.askyesno(
                     "Already installed",
                     f"Version '{version_id}' is already installed.\nDownload again?"):
                 return
-
+        import threading as _thr
+        self._cancelled = _thr.Event()
         self.downloading = True
         self.btn_download.config(state="disabled")
         self.status.config(text=f"Downloading {version_id}...")
         self.progress["value"] = 0
-
+        cancel = self._cancelled
         def work():
             def report(msg, frac):
+                if cancel.is_set():
+                    return
                 self.after(0, lambda: (self.status.config(text=msg),
                                        self.progress.__setitem__("value", int(frac * 100))))
             try:
-                self.launcher.download_version(version_id, progress=report)
-                self.after(0, lambda: (
-                    self.status.config(text=f"{version_id} installed"),
-                    self.progress.__setitem__("value", 100)))
-                if self.on_done:
-                    self.after(0, self.on_done)
+                self.launcher.download_version(version_id, progress=report,
+                                               cancel_event=cancel)
+                if not cancel.is_set():
+                    self.after(0, lambda: (
+                        self.status.config(text=f"{version_id} installed \u2713"),
+                        self.progress.__setitem__("value", 100)))
+                    if self.on_done:
+                        self.after(0, self.on_done)
+            except core.DownloadCancelled:
+                self.after(0, lambda: self.status.config(text="Download cancelled"))
             except Exception as e:
-                err = str(e)
-                self.after(0, lambda err=err: messagebox.showerror(
-                    "Download error", err))
+                if not cancel.is_set():
+                    err = str(e)
+                    self.after(0, lambda err=err: messagebox.showerror(
+                        "Download error", err))
             finally:
-                self.after(0, lambda: self.btn_download.config(state="normal"))
-                self.downloading = False
-
+                self.after(0, self._finish_download)
         threading_work(work)
+
+    def _download_fabric(self):
+        mc = self.fab_mc_cb.get()
+        loader = self.fab_loader_cb.get()
+        if not mc or not loader or mc.startswith(("Loading", "Error")):
+            return
+        import threading as _thr
+        self._cancelled = _thr.Event()
+        self.downloading = True
+        self.btn_download.config(state="disabled")
+        self.status.config(text=f"Installing Fabric {loader} for {mc}...")
+        self.progress["value"] = 0
+        cancel = self._cancelled
+        def work():
+            def report(msg, frac):
+                if cancel.is_set():
+                    return
+                self.after(0, lambda: (self.status.config(text=msg),
+                                       self.progress.__setitem__("value", int(frac * 100))))
+            try:
+                vid = _install_fabric(self.launcher.root, mc, loader,
+                                      progress=report, cancel_event=cancel)
+                if not cancel.is_set():
+                    self.after(0, lambda: (
+                        self.status.config(text=f"Fabric installed \u2713  ({vid})"),
+                        self.progress.__setitem__("value", 100)))
+                    if self.on_done:
+                        self.after(0, self.on_done)
+            except core.DownloadCancelled:
+                self.after(0, lambda: self.status.config(text="Download cancelled"))
+            except Exception as e:
+                if not cancel.is_set():
+                    err = str(e)
+                    self.after(0, lambda err=err: messagebox.showerror(
+                        "Fabric install error", err))
+            finally:
+                self.after(0, self._finish_download)
+        threading_work(work)
+
+    def _download_forge(self):
+        forge_ver = self.forge_ver_cb.get()
+        if not forge_ver or forge_ver.startswith(("Loading", "Error", "No ", "Select")):
+            return
+        import threading as _thr
+        self._cancelled = _thr.Event()
+        self.downloading = True
+        self.btn_download.config(state="disabled")
+        self.status.config(text=f"Installing Forge {forge_ver}...")
+        self.progress["value"] = 0
+        cancel = self._cancelled
+        def work():
+            def report(msg, frac):
+                if cancel.is_set():
+                    return
+                self.after(0, lambda: (self.status.config(text=msg),
+                                       self.progress.__setitem__("value", int(frac * 100))))
+            try:
+                _install_forge(self.launcher.root, forge_ver,
+                               progress=report, cancel_event=cancel)
+                if not cancel.is_set():
+                    self.after(0, lambda: (
+                        self.status.config(text=f"Forge {forge_ver} installed \u2713"),
+                        self.progress.__setitem__("value", 100)))
+                    if self.on_done:
+                        self.after(0, self.on_done)
+            except core.DownloadCancelled:
+                self.after(0, lambda: self.status.config(text="Download cancelled"))
+            except Exception as e:
+                if not cancel.is_set():
+                    err = str(e)
+                    self.after(0, lambda err=err: messagebox.showerror(
+                        "Forge install error", err))
+            finally:
+                self.after(0, self._finish_download)
+        threading_work(work)
+
+    def _finish_download(self):
+        self.downloading = False
+        self._cancelled = None
+        try:
+            self.btn_download.config(state="normal")
+        except Exception:
+            pass
 
     def _close(self):
         if self.downloading:
-            messagebox.showinfo("Download in progress",
-                                "Wait for the download to complete!")
+            if self._cancelled and not self._cancelled.is_set():
+                self._cancelled.set()
+                self.status.config(text="Cancelling...")
+                self.btn_download.config(state="disabled")
             return
         self.destroy()
-
 
 # --- settings window ------------------------------------------------------- #
 class SettingsWindow(tk.Toplevel):

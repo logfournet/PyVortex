@@ -1,0 +1,5 @@
+# Build-time only dependencies (the launcher itself uses the stdlib only).
+# Used by .github/workflows/build.yml and for local EXE builds.
+nuitka>=2.7
+ordered-set
+zstandard

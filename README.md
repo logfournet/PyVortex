@@ -35,7 +35,9 @@ free Microsoft account that owns Minecraft: Java Edition is required.
 
 ## How to run
 
-Double-click `PyVortex.bat` (or run `python main.py`):
+Double-click `PyVortex.exe` from the
+[Releases page](https://github.com/logfournet/PyVortex/releases) — or, if you
+clone the source, double-click `run.bat` (or run `python main.py`):
 
 1. Enter a **Player name** (≥ 3 characters, no spaces).
 2. Under **Memory (MB)** set how much RAM to give Minecraft (min 350).
@@ -60,8 +62,36 @@ launcher/
   auth.py             — Microsoft OAuth device-code login (premium accounts)
   avatar.py           — fetch skin + decode/crop the in-game face avatar
   gui.py              — Tkinter interface (dark theme, multi-account, avatars)
+  assets/pyvortex.ico — window / EXE icon
+.github/workflows/build.yml — CI: builds PyVortex.exe and attaches it to a tag's Release
+requirements-build.txt      — build-only deps (Nuitka); the app itself is stdlib-only
+run.bat                     — runs from source on Windows
 config.json           — created at runtime (name / ram / accounts / settings)
 launch_command.txt    — created at runtime (last launched JVM command)
+```
+
+## Building the EXE
+
+The executable is **never committed** to this repository — it is built by
+GitHub Actions and attached to a Release:
+
+1. Push a version tag, e.g. `git tag v1.0.4 && git push origin v1.0.4`.
+2. The workflow compiles `main.py` with Nuitka (`--onefile`) on
+   `windows-latest` and uploads `PyVortex.exe` to that tag's Release.
+3. Download it from the [Releases page](https://github.com/logfournet/PyVortex/releases).
+   Runs triggered by a normal branch push (or manually via
+   `workflow_dispatch`) only produce a build artifact, no Release.
+
+To build locally instead:
+
+```bat
+pip install -r requirements-build.txt
+python -m nuitka --assume-yes-for-downloads --standalone --onefile ^
+    --enable-plugin=tk-inter --windows-console-mode=disable ^
+    --windows-icon-from-ico=launcher/assets/pyvortex.ico ^
+    --company-name=PyVortex --product-name=PyVortex ^
+    --file-description="PyVortex Minecraft Launcher" ^
+    --output-filename=PyVortex.exe --output-dir=dist_nuitka main.py
 ```
 
 ## Notes
@@ -78,5 +108,6 @@ launch_command.txt    — created at runtime (last launched JVM command)
 
 ## Requirements
 
-- Windows 10/11 with Python 3.9+ installed (Tkinter included by default).
+- **EXE build (recommended):** Windows 10/11 only — Python is not needed.
+- **From source:** Windows 10/11 with Python 3.9+ (Tkinter included by default).
 - Internet connection for downloading versions / Java.

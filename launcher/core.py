@@ -73,11 +73,18 @@ def set_download_workers(n):
         DOWNLOAD_WORKERS = max(1, int(n))
 
 
-def download_tasks_parallel(tasks, progress=None, label="Files"):
+class DownloadCancelled(Exception):
+    """Raised when a download batch is cancelled by the user."""
+
+
+def download_tasks_parallel(tasks, progress=None, label="Files",
+                            cancel_event=None):
     """Download `tasks` (list of (url, dest, expected_sha1)) in parallel.
 
     Returns (ok, failed): ok = number succeeded, failed = number that raised.
     Files that already exist (and match sha1) are skipped quickly.
+    If *cancel_event* (a threading.Event) is set, pending work is skipped and
+    DownloadCancelled is raised once the pool drains.
     """
     # Pre-filter already-present files so the pool only does real work.
     pending = []
@@ -112,6 +119,8 @@ def download_tasks_parallel(tasks, progress=None, label="Files"):
 
     def work(item):
         nonlocal done, failed
+        if cancel_event and cancel_event.is_set():
+            return
         url, dest, expected_sha1 = item
         ok = True
         if url:
@@ -127,12 +136,15 @@ def download_tasks_parallel(tasks, progress=None, label="Files"):
             cur_done = done
             if not ok:
                 failed += 1
-        if progress:
+        if progress and not (cancel_event and cancel_event.is_set()):
             progress(f"{label} {cur_done}/{total}", cur_done / total)
 
     workers = DOWNLOAD_WORKERS
     with ThreadPoolExecutor(max_workers=workers) as ex:
         list(ex.map(work, pending))
+
+    if cancel_event and cancel_event.is_set():
+        raise DownloadCancelled("Download cancelled")
 
     if progress:
         progress(f"{label} done", 1.0)
@@ -299,7 +311,8 @@ def library_path(lib_coords: str, natives=False) -> list:
 # --------------------------------------------------------------------------- #
 #  Download orchestration
 # --------------------------------------------------------------------------- #
-def download_missing_libraries(root: Path, version_meta: dict, progress=None):
+def download_missing_libraries(root: Path, version_meta: dict, progress=None,
+                               cancel_event=None):
     """Download all libraries (incl. natives) needed on Windows."""
     libs = version_meta.get("libraries", [])
     tasks = []
@@ -342,12 +355,15 @@ def download_missing_libraries(root: Path, version_meta: dict, progress=None):
 
     total = len(tasks)
     # Send all tasks through the multi-threaded pool.
-    ok, failed = download_tasks_parallel(tasks, progress=progress, label="Libraries")
+    ok, failed = download_tasks_parallel(tasks, progress=progress,
+                                         label="Libraries",
+                                         cancel_event=cancel_event)
     if progress:
         progress(f"Libraries done ({ok - failed} ok)", 1.0)
 
 
-def download_assets(root: Path, asset_index: dict, progress=None):
+def download_assets(root: Path, asset_index: dict, progress=None,
+                    cancel_event=None):
     assets = asset_index.get("objects", {})
     tasks = []
     for name, info in assets.items():
@@ -360,7 +376,8 @@ def download_assets(root: Path, asset_index: dict, progress=None):
         local = root / "assets" / "objects" / h[:2] / h
         url = ASSET_BASE_URL + h[:2] + "/" + h
         tasks.append((url, local, size))  # int -> size check for skip
-    download_tasks_parallel(tasks, progress=progress, label="Assets")
+    download_tasks_parallel(tasks, progress=progress, label="Assets",
+                            cancel_event=cancel_event)
     if progress:
         progress("Assets done", 1.0)
 
@@ -419,7 +436,12 @@ def build_classpath(root: Path, version_meta: dict, version_id: str) -> list:
         if local.exists():
             cp.append(str(local))
     client_jar = root / "versions" / version_id / f"{version_id}.jar"
-    if client_jar.exists():
+    inherits = version_meta.get("inheritsFrom")
+    if inherits:
+        parent_jar = root / "versions" / inherits / f"{inherits}.jar"
+        if parent_jar.exists():
+            cp.append(str(parent_jar))
+    elif client_jar.exists():
         cp.append(str(client_jar))
     return cp
 
@@ -468,7 +490,17 @@ def build_arguments(root: Path, version_meta: dict, version_id: str,
             cp.append(str(local))
     client_dir = root / "versions" / version_id
     client_jar = client_dir / f"{version_id}.jar"
-    if client_jar.exists():
+    inherits = version_meta.get("inheritsFrom")
+    if inherits:
+        # Modded versions (Fabric, Forge …) inherit from vanilla.  Their own
+        # jar in versions/<id>/ is typically a duplicate of the loader that is
+        # already on the classpath via libraries/.  Adding it again causes
+        # "duplicate … classes found on classpath" crashes.  Use the parent
+        # (vanilla) client jar instead.
+        parent_jar = root / "versions" / inherits / f"{inherits}.jar"
+        if parent_jar.exists():
+            cp.append(str(parent_jar))
+    elif client_jar.exists():
         cp.append(str(client_jar))
     classpath = os.pathsep.join(cp)
 

@@ -31,7 +31,8 @@ class GameLauncher:
         return sorted(out, reverse=True)
 
     # ---- download one full version ------------------------------------------
-    def download_version(self, version_id, progress=None, install=True):
+    def download_version(self, version_id, progress=None, install=True,
+                         cancel_event=None):
         manifest = self.fetch_manifest()
         meta_url = manifest.get_version_meta_url(version_id)
         if not meta_url:
@@ -41,6 +42,9 @@ class GameLauncher:
             progress(f"Fetching metadata for {version_id}", 0.0)
         ver = core.MinecraftVersion.load(self.root, version_id, meta_url)
         effective = ver.effective()
+
+        if cancel_event and cancel_event.is_set():
+            raise core.DownloadCancelled("Download cancelled")
 
         # 1) client jar
         client_dir = self.root / "versions" / version_id
@@ -55,6 +59,9 @@ class GameLauncher:
                     progress(f"Downloading {version_id} client", 0.1)
                 core.http_download(client["url"], client_jar)
 
+        if cancel_event and cancel_event.is_set():
+            raise core.DownloadCancelled("Download cancelled")
+
         # 2) asset index
         asset_index = effective.get("assets", "legacy")
         asset_index_json = effective.get("assetIndex", {})
@@ -66,12 +73,14 @@ class GameLauncher:
         asset_obj = json_load(asset_index_path)
         if progress:
             progress("Downloading assets...", 0.3)
-        core.download_assets(self.root, asset_obj, progress)
+        core.download_assets(self.root, asset_obj, progress,
+                             cancel_event=cancel_event)
 
         # 3) libraries
         if progress:
             progress("Downloading libraries...", 0.6)
-        core.download_missing_libraries(self.root, effective, progress)
+        core.download_missing_libraries(self.root, effective, progress,
+                                        cancel_event=cancel_event)
 
         # 4) natives
         core.extract_natives(self.root, effective, version_id)
@@ -150,7 +159,12 @@ class GameLauncher:
         with open(self.root / "launch_command.txt", "w", encoding="utf-8") as f:
             f.write(" ".join(cmd))
 
-        subprocess.Popen(cmd, cwd=str(self.root))
+        # Launch with stderr captured so crashes leave a trace in the log.
+        log_path = self.root / "logs" / "launcher_stderr.log"
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        stderr_file = open(log_path, "w", encoding="utf-8")
+        subprocess.Popen(cmd, cwd=str(self.root),
+                         stderr=stderr_file, stdout=subprocess.DEVNULL)
         return True
 
     def ensure_game_files(self, version_id, effective, progress=None):
@@ -159,6 +173,13 @@ class GameLauncher:
         client_jar = client_dir / f"{version_id}.jar"
         downloads = effective.get("downloads", {})
         client = downloads.get("client")
+        # For modded versions (Fabric etc.) that inherit from vanilla, the
+        # client jar lives in the parent version's directory.
+        inherits = effective.get("inheritsFrom")
+        if not client_jar.exists() and inherits:
+            parent_jar = self.root / "versions" / inherits / f"{inherits}.jar"
+            if parent_jar.exists():
+                client_jar = parent_jar  # already there, no need to download
         if not client_jar.exists() and client:
             if progress:
                 progress("Downloading client...", 0.0)

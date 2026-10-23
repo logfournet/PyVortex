@@ -20,6 +20,12 @@ build/
 config.json
 launch_command.txt
 options.txt
+# Local build output (NEVER commit the .exe — releases are built by
+# GitHub Actions and attached to the tag's Release page instead)
+dist/
+dist_nuitka/
+build/
+*.spec
 
 # IDE
 .idea/
